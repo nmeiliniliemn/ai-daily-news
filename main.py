@@ -11,7 +11,7 @@ import requests
 from bs4 import BeautifulSoup
 import google.generativeai as genai
 from dotenv import load_dotenv
-
+load_dotenv()
 # ==================== 环境与网络配置 ====================
 # 加载环境变量
 load_dotenv('config.env') 
@@ -266,8 +266,20 @@ def main():
     主函数：串联整个流程
     """
     try:
+        # === 新增调试代码 ===
+        print("🔍 正在检查环境密钥...")
+        if os.getenv('GOOGLE_API_KEY'):
+            print("✅ GOOGLE_API_KEY 已检测到")
+        else:
+            print("❌ 严重错误: 未找到 GOOGLE_API_KEY")
+            
+        if os.getenv('PUSHPLUS_TOKEN'):
+            print("✅ PUSHPLUS_TOKEN 已检测到")
+        else:
+            print("❌ 严重错误: 未找到 PUSHPLUS_TOKEN")
+        # ===================
+
         print("🚀 AI 每日早报 2.0 开始执行")
-        print("=" * 50)
 
         # 1. 爬取新闻
         news_items = scrape_aibase_news()
