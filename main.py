@@ -61,12 +61,8 @@ def scrape_aibase_news():
         }
 
         # 设置代理
-        proxies = {
-            'http': 'http://127.0.0.1:21879',
-            'https': 'http://127.0.0.1:21879'
-        }
 
-        response = requests.get(TARGET_URL, headers=headers, proxies=proxies, timeout=30)
+        response = requests.get(TARGET_URL, headers=headers, timeout=30)
         response.raise_for_status()
         response.encoding = 'utf-8'
 
@@ -248,13 +244,10 @@ def send_push_notification(title, content):
         }
 
         # 设置代理
-        proxies = {
-            'http': 'http://127.0.0.1:21879',
-            'https': 'http://127.0.0.1:21879'
-        }
+        
 
         # 发送推送
-        response = requests.post(PUSHPLUS_URL, json=data, proxies=proxies, timeout=30)
+        response = requests.post(PUSHPLUS_URL, json=data, timeout=30)
         response.raise_for_status()
 
         result = response.json()
