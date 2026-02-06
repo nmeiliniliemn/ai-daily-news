@@ -1,0 +1,4 @@
+google-generative-ai
+requests
+beautifulsoup4
+python-dotenv
