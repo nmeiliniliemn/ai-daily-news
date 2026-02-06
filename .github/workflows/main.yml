@@ -11,18 +11,19 @@ jobs:
     
     steps:
     - name: Check out code
-      uses: actions/checkout@v2
+      uses: actions/checkout@v3
       
     - name: Set up Python
       uses: actions/setup-python@v4
       with:
-        python-version: '3.10' # 升级到 3.10，兼容性更好
+        python-version: '3.9' # 🚨 回退到 3.9，这是 Google 库支持最好的版本
         
     - name: Install dependencies
-      # ⚠️ 这里改了：直接写死要安装的库，不再读取 requirements.txt
-      # 这样避免了文件编码或路径错误的问题
+      # 🚨 重点修改：
+      # 1. 删除了 "upgrade pip" (不再手动升级，使用系统自带的稳定版)
+      # 2. 增加了 setuptools 和 wheel 的升级 (防止编译失败)
       run: |
-        python -m pip install --upgrade pip
+        python -m pip install --upgrade setuptools wheel
         pip install google-generative-ai requests beautifulsoup4 python-dotenv
         
     - name: Run script
