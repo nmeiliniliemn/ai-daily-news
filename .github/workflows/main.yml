@@ -1,9 +1,9 @@
 name: AI Daily News Auto Run
 
 on:
-  workflow_dispatch:      # 允许你手动点击按钮测试
+  workflow_dispatch:
   schedule:
-    - cron: '0 2 * * *'   # 每天 UTC 02:00 运行 (等于北京时间 10:00)
+    - cron: '0 2 * * *' # 北京时间 10:00
 
 jobs:
   run_daily_news:
@@ -14,18 +14,19 @@ jobs:
       uses: actions/checkout@v2
       
     - name: Set up Python
-      uses: actions/setup-python@v2
+      uses: actions/setup-python@v4
       with:
-        python-version: '3.9'
+        python-version: '3.10' # 升级到 3.10，兼容性更好
         
     - name: Install dependencies
+      # ⚠️ 这里改了：直接写死要安装的库，不再读取 requirements.txt
+      # 这样避免了文件编码或路径错误的问题
       run: |
         python -m pip install --upgrade pip
-        if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+        pip install google-generative-ai requests beautifulsoup4 python-dotenv
         
     - name: Run script
       env:
-        # 这里引用我们在 Settings 里配置的密钥
         GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
         PUSHPLUS_TOKEN: ${{ secrets.PUSHPLUS_TOKEN }}
       run: python main.py
