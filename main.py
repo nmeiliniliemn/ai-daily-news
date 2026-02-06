@@ -14,13 +14,16 @@ from dotenv import load_dotenv
 
 # ==================== 环境与网络配置 ====================
 # 加载环境变量
-load_dotenv('config.env')  # 使用 config.env 文件而不是 .env
+load_dotenv('config.env') 
 
-# 强制设置代理（非常重要）
-os.environ['HTTP_PROXY'] = 'http://127.0.0.1:21879'
-os.environ['HTTPS_PROXY'] = 'http://127.0.0.1:21879'
-os.environ['http_proxy'] = 'http://127.0.0.1:21879'
-os.environ['https_proxy'] = 'http://127.0.0.1:21879'
+# 智能代理判断：只有在非 GitHub 环境（也就是你本地）才开启代理
+# GitHub 服务器在国外，不需要代理，开启反而会报错
+if not os.getenv('GITHUB_ACTIONS'):
+    print("🌍 检测到本地环境，启用代理 21879...")
+    os.environ['HTTP_PROXY'] = 'http://127.0.0.1:21879'
+    os.environ['HTTPS_PROXY'] = 'http://127.0.0.1:21879'
+else:
+    print("☁️ 检测到 GitHub Actions 环境，直连互联网...")
 
 # ==================== 常量配置 ====================
 TARGET_URL = "https://news.aibase.com/zh/daily"
