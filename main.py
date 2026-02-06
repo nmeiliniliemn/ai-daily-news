@@ -1,9 +1,5 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""
-AI 每日早报 2.0
-自动从 AIbase 获取最新 AI 新闻，使用 Google Gemini 总结，并推送至 PushPlus
-"""
 
 import os
 import sys
@@ -11,294 +7,149 @@ import requests
 from bs4 import BeautifulSoup
 import google.generativeai as genai
 from dotenv import load_dotenv
-load_dotenv()
-# ==================== 环境与网络配置 ====================
-# 加载环境变量
-load_dotenv('config.env') 
 
-# 智能代理判断：只有在非 GitHub 环境（也就是你本地）才开启代理
-# GitHub 服务器在国外，不需要代理，开启反而会报错
-if not os.getenv('GITHUB_ACTIONS'):
-    print("🌍 检测到本地环境，启用代理 21879...")
+# ==================== 0. 环境初始化 ====================
+# 自动加载环境变量 (兼容模式：有文件读文件，没文件读 Secrets)
+load_dotenv()
+
+# 调试打印：检查密钥是否存在 (不会打印真实值)
+print("-" * 30)
+print("🔍 环境自检...")
+if os.getenv('GITHUB_ACTIONS'):
+    print("☁️ 运行环境: GitHub Actions (自动直连模式)")
+else:
+    print("🌍 运行环境: 本地 (尝试加载代理)")
+    # 只有在本地才强制走代理，GitHub 上绝对不能设
     os.environ['HTTP_PROXY'] = 'http://127.0.0.1:21879'
     os.environ['HTTPS_PROXY'] = 'http://127.0.0.1:21879'
+
+if os.getenv('GOOGLE_API_KEY'):
+    print("✅ GOOGLE_API_KEY: 已检测到")
 else:
-    print("☁️ 检测到 GitHub Actions 环境，直连互联网...")
+    print("❌ 错误: 未找到 GOOGLE_API_KEY，请检查 GitHub Settings -> Secrets")
+    
+if os.getenv('PUSHPLUS_TOKEN'):
+    print("✅ PUSHPLUS_TOKEN: 已检测到")
+else:
+    print("❌ 错误: 未找到 PUSHPLUS_TOKEN，请检查 GitHub Settings -> Secrets")
+print("-" * 30)
 
 # ==================== 常量配置 ====================
 TARGET_URL = "https://news.aibase.com/zh/daily"
-USER_AGENT = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 PUSHPLUS_URL = "http://www.pushplus.plus/send"
+# 伪装成浏览器，防止 403 Forbidden
+HEADERS = {
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+}
 
-# AI Prompt 模板
-AI_PROMPT = """你是一个 AI 科技观察员。请根据我提供的 AIbase 最新资讯列表，写一份【AI 每日早报】。
-
-要求：
-提炼 5-8 条最重要的 AI 行业动态。
-每一条用 Emoji 开头（如 🤖, 🚀），一句话概括核心，并在末尾附上原文链接。
-风格简洁、高信噪比。
-只要输出最终内容，不要多余的废话。
-
-资讯列表：
-{news_content}
-"""
-
-# ==================== 爬虫模块 ====================
-def scrape_aibase_news():
-    """
-    从 AIbase 网站爬取最新的 AI 新闻
-    """
+# ==================== 1. 爬虫模块 ====================
+def scrape_news():
+    print(f"🕷️ 开始抓取: {TARGET_URL}")
     try:
-        print("🔍 开始爬取 AIbase 新闻...")
-
-        headers = {
-            'User-Agent': USER_AGENT,
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-            'Accept-Language': 'zh-CN,zh;q=0.8,en-US;q=0.5,en;q=0.3',
-            'Accept-Encoding': 'gzip, deflate, br',
-            'Connection': 'keep-alive',
-            'Upgrade-Insecure-Requests': '1',
-        }
-
-        # 设置代理
-
-        response = requests.get(TARGET_URL, headers=headers, timeout=30)
-        response.raise_for_status()
-        response.encoding = 'utf-8'
-
-        soup = BeautifulSoup(response.text, 'html.parser')
-
-        # 提取新闻列表
-        news_items = []
-
-        # 方法1: 查找包含新闻链接的容器
-        news_containers = soup.find_all(['div', 'article', 'section'], class_=lambda x: x and any(keyword in x.lower() for keyword in ['news', 'article', 'item', 'card', 'post']))
-
-        if not news_containers:
-            # 方法2: 查找所有 h3 和 a 标签
-            news_containers = soup.find_all(['h3', 'a'])
-
-        for container in news_containers[:20]:  # 限制搜索范围
-            # 查找标题和链接
-            title_elem = None
-            link_elem = None
-
-            # 如果是 h3 标签，直接使用
-            if container.name == 'h3':
-                title_elem = container
-                link_elem = container.find_parent('a') or container.find('a')
-
-            # 如果是 a 标签
-            elif container.name == 'a':
-                title_elem = container
-                link_elem = container
-
-            # 如果是其他容器，查找内部的标题和链接
-            else:
-                title_elem = container.find(['h3', 'h4', 'h2', 'a'])
-                link_elem = container.find('a') or title_elem if title_elem and title_elem.name == 'a' else container.find('a')
-
-            if title_elem and link_elem:
-                title = title_elem.get_text(strip=True)
-                link = link_elem.get('href')
-
-                # 过滤有效的新闻标题
-                if (title and len(title) > 10 and
-                    any(keyword in title.lower() for keyword in ['ai', '人工智能', '机器学习', '深度学习', 'chatgpt', 'gpt', 'llm', '大模型', '科技', '技术']) and
-                    link and 'http' in link):
-
-                    # 确保链接是完整的 URL
-                    if not link.startswith('http'):
-                        link = f"https://news.aibase.com{link}" if link.startswith('/') else link
-
-                    news_items.append({
-                        'title': title,
-                        'link': link
-                    })
-
-                    # 限制数量
-                    if len(news_items) >= 15:
-                        break
-
-        # 如果没找到足够的新闻，尝试另一种方法
-        if len(news_items) < 5:
-            print("⚠️  标准方法未找到足够新闻，尝试备用方法...")
-            all_links = soup.find_all('a', href=True)
-            for link in all_links[:50]:  # 检查前50个链接
-                title = link.get_text(strip=True)
-                href = link['href']
-
-                if (title and len(title) > 20 and  # 增加标题长度要求
-                    any(keyword in title.lower() for keyword in ['ai', '人工智能', '机器学习', 'chatgpt', 'gpt', '日报', '新闻']) and
-                    ('daily' in href or 'news' in href or 'article' in href)):
-
-                    if not href.startswith('http'):
-                        href = f"https://news.aibase.com{href}" if href.startswith('/') else href
-
-                    news_items.append({
-                        'title': title[:100] + '...' if len(title) > 100 else title,  # 限制标题长度
-                        'link': href
-                    })
-
-                    if len(news_items) >= 15:
-                        break
-
-        # 如果还是没找到足够新闻，尝试解析页面中的文章内容
-        if len(news_items) < 3:
-            print("⚠️  备用方法仍未找到足够新闻，尝试解析页面内容...")
-            # 查找包含新闻内容的div或section
-            content_areas = soup.find_all(['div', 'section', 'article'], class_=lambda x: x and any(word in ' '.join(x).lower() for word in ['content', 'news', 'article', 'post', 'entry']))
-
-            for area in content_areas[:5]:  # 只检查前5个内容区域
-                # 在内容区域内查找段落或列表项
-                paragraphs = area.find_all(['p', 'li', 'h3', 'h4'])
-                for para in paragraphs:
-                    text = para.get_text(strip=True)
-                    if (text and len(text) > 30 and len(text) < 200 and  # 合适的段落长度
-                        any(keyword in text.lower() for keyword in ['ai', '人工智能', '机器学习', 'chatgpt', 'gpt'])):
-
-                        news_items.append({
-                            'title': text[:150] + '...' if len(text) > 150 else text,
-                            'link': TARGET_URL  # 使用主页链接
-                        })
-
-                        if len(news_items) >= 10:  # 降低要求到10条
-                            break
-                if len(news_items) >= 10:
-                    break
-
-        print(f"✅ 成功获取 {len(news_items)} 条新闻")
-        return news_items[:15]  # 最多返回15条
+        # 注意：这里千万不能传 proxies 参数，让 requests 自动处理
+        resp = requests.get(TARGET_URL, headers=HEADERS, timeout=30)
+        resp.raise_for_status() # 如果 404 或 403 会直接报错
+        
+        soup = BeautifulSoup(resp.text, 'html.parser')
+        news_list = []
+        
+        # 针对 AIbase 的通用抓取策略
+        # 查找所有的链接，筛选看起来像新闻的
+        links = soup.find_all('a', href=True)
+        
+        for link in links:
+            text = link.get_text(strip=True)
+            href = link['href']
+            
+            # 简单的筛选逻辑：长度够长，且包含 AI 关键词
+            if len(text) > 10 and any(k in text.lower() for k in ['ai', 'gpt', '模型', '智能', 'daily', 'news']):
+                if not href.startswith('http'):
+                    href = f"https://news.aibase.com{href}"
+                
+                # 去重
+                if not any(n['link'] == href for n in news_list):
+                    news_list.append({'title': text, 'link': href})
+            
+            if len(news_list) >= 10: # 只要前10条
+                break
+        
+        if not news_list:
+            print("⚠️ 警告: 未找到符合条件的新闻，尝试抓取页面所有 H3 标题...")
+            for h3 in soup.find_all('h3'):
+                t = h3.get_text(strip=True)
+                if len(t) > 5:
+                    news_list.append({'title': t, 'link': TARGET_URL})
+        
+        print(f"✅ 抓取到 {len(news_list)} 条内容")
+        return news_list
 
     except Exception as e:
-        print(f"❌ 爬取失败: {str(e)}")
-        raise
+        print(f"❌ 爬虫出错: {e}")
+        return []
 
-# ==================== AI 总结模块 ====================
-def summarize_with_ai(news_items):
-    """
-    使用 Google Gemini 对新闻进行总结
-    """
+# ==================== 2. AI 总结模块 ====================
+def summarize(news_data):
+    if not news_data:
+        return "今日暂无 AI 资讯获取。"
+        
+    print("🧠 正在请求 Gemini 进行总结...")
     try:
-        print("🤖 开始 AI 总结...")
-
-        # 检查 API 密钥
-        api_key = os.getenv('GOOGLE_API_KEY')
-        if not api_key:
-            raise ValueError("未找到 GOOGLE_API_KEY 环境变量")
-
-        # 配置 Gemini
-        genai.configure(api_key=api_key)
+        genai.configure(api_key=os.getenv('GOOGLE_API_KEY'))
         model = genai.GenerativeModel('gemini-1.5-flash')
-
-        # 准备新闻内容
-        news_content = ""
-        for i, item in enumerate(news_items, 1):
-            news_content += f"{i}. {item['title']}\n   链接: {item['link']}\n\n"
-
-        # 生成总结
-        prompt = AI_PROMPT.format(news_content=news_content)
+        
+        # 构建 Prompt
+        content_text = "\n".join([f"- {n['title']} ({n['link']})" for n in news_data])
+        prompt = f"""
+        你是一个科技主编。请根据以下 AI 新闻列表，写一份【AI 每日早报】。
+        
+        要求：
+        1. 挑选 5-6 条最重要的内容。
+        2. 每条用 Emoji 开头，一句话概括，并附带链接。
+        3. 只要正文，不要废话。
+        
+        新闻列表：
+        {content_text}
+        """
+        
         response = model.generate_content(prompt)
-
-        summary = response.text.strip()
-        print("✅ AI 总结完成")
-        return summary
-
+        return response.text
     except Exception as e:
-        error_msg = str(e)
-        print(f"❌ AI 总结失败: {error_msg}")
+        print(f"❌ AI 总结出错: {e}")
+        return "AI 总结服务暂时不可用。"
 
-        # 如果是API相关问题，生成简单的文本总结
-        if ("quota" in error_msg.lower() or "429" in error_msg or
-            "404" in error_msg or "not found" in error_msg.lower() or
-            "unavailable" in error_msg.lower()):
-            print("⚠️  API 调用失败，使用简单文本总结...")
-            simple_summary = "# AI 每日早报\n\n由于 API 限制，以下是今日 AI 新闻摘要：\n\n"
-            for i, item in enumerate(news_items[:8], 1):  # 最多显示8条
-                simple_summary += f"{i}. {item['title']}\n🔗 {item['link']}\n\n"
-            simple_summary += "\n*注：API 服务暂时不可用，建议稍后重试或升级付费计划*"
-            return simple_summary
-        else:
-            # 对于其他未知错误，仍然抛出异常
-            raise
+# ==================== 3. 推送模块 ====================
+def push_msg(content):
+    print("📨 正在推送...")
+    token = os.getenv('PUSHPLUS_TOKEN')
+    if not token:
+        print("❌ 无法推送：缺少 Token")
+        return
 
-# ==================== 推送模块 ====================
-def send_push_notification(title, content):
-    """
-    发送推送通知到 PushPlus
-    """
     try:
-        print("📱 开始推送通知...")
-
-        # 检查推送令牌
-        token = os.getenv('PUSHPLUS_TOKEN')
-        if not token:
-            raise ValueError("未找到 PUSHPLUS_TOKEN 环境变量")
-
-        # 准备推送数据
         data = {
             'token': token,
-            'title': title,
+            'title': 'AI 每日早报',
             'content': content,
             'template': 'markdown'
         }
-
-        # 设置代理
-        
-
-        # 发送推送
-        response = requests.post(PUSHPLUS_URL, json=data, timeout=30)
-        response.raise_for_status()
-
-        result = response.json()
-        if result.get('code') == 200:
-            print("✅ 推送成功")
-        else:
-            raise ValueError(f"推送失败: {result.get('msg', '未知错误')}")
-
+        # 注意：这里也不能传 proxies
+        resp = requests.post(PUSHPLUS_URL, json=data, timeout=30)
+        print(f"✅ 推送响应: {resp.text}")
     except Exception as e:
-        print(f"❌ 推送失败: {str(e)}")
-        raise
+        print(f"❌ 推送出错: {e}")
 
-# ==================== 主函数 ====================
-def main():
-    """
-    主函数：串联整个流程
-    """
-    try:
-        # === 新增调试代码 ===
-        print("🔍 正在检查环境密钥...")
-        if os.getenv('GOOGLE_API_KEY'):
-            print("✅ GOOGLE_API_KEY 已检测到")
-        else:
-            print("❌ 严重错误: 未找到 GOOGLE_API_KEY")
-            
-        if os.getenv('PUSHPLUS_TOKEN'):
-            print("✅ PUSHPLUS_TOKEN 已检测到")
-        else:
-            print("❌ 严重错误: 未找到 PUSHPLUS_TOKEN")
-        # ===================
-
-        print("🚀 AI 每日早报 2.0 开始执行")
-
-        # 1. 爬取新闻
-        news_items = scrape_aibase_news()
-        if not news_items:
-            raise ValueError("未获取到任何新闻内容")
-
-        # 2. AI 总结
-        summary = summarize_with_ai(news_items)
-
-        # 3. 推送通知
-        send_push_notification("AI每日早报", summary)
-
-        print("=" * 50)
-        print("🎉 AI 每日早报执行完成！")
-
-    except Exception as e:
-        print(f"💥 执行失败: {str(e)}")
-        sys.exit(1)
-
-# ==================== 程序入口 ====================
+# ==================== 主入口 ====================
 if __name__ == "__main__":
-    main()
+    # 1. 抓取
+    news = scrape_news()
+    
+    # 2. 如果没抓到，不报错退出，而是发送一条“空日报”提醒，方便排查
+    if not news:
+        final_content = "⚠️ 警告：爬虫今日未抓取到任何数据，请检查网站结构是否变更。"
+    else:
+        # 3. 总结
+        final_content = summarize(news)
+    
+    # 4. 发送
+    push_msg(final_content)
+    print("🚀 任务全部完成")
