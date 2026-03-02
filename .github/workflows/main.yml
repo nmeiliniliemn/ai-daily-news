@@ -16,11 +16,11 @@ jobs:
     - name: Set up Python
       uses: actions/setup-python@v4
       with:
-        python-version: '3.9' # 保持稳定的 3.9 版本
+        python-version: '3.10' # 🚀 关键升级：从 3.9 升到 3.10，解决兼容性问题
         
     - name: Install dependencies
-      # ⚠️ 注意：这里去掉了 python-dotenv，只装核心的3个库
       run: |
+        python -m pip install --upgrade pip # 🚀 关键步骤：强制升级安装工具
         pip install google-generative-ai requests beautifulsoup4
         
     - name: Run script
