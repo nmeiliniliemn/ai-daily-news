@@ -16,15 +16,12 @@ jobs:
     - name: Set up Python
       uses: actions/setup-python@v4
       with:
-        python-version: '3.9' # 🚨 回退到 3.9，这是 Google 库支持最好的版本
+        python-version: '3.9' # 保持稳定的 3.9 版本
         
     - name: Install dependencies
-      # 🚨 重点修改：
-      # 1. 删除了 "upgrade pip" (不再手动升级，使用系统自带的稳定版)
-      # 2. 增加了 setuptools 和 wheel 的升级 (防止编译失败)
+      # ⚠️ 注意：这里去掉了 python-dotenv，只装核心的3个库
       run: |
-        python -m pip install --upgrade setuptools wheel
-        pip install google-generative-ai requests beautifulsoup4 python-dotenv
+        pip install google-generative-ai requests beautifulsoup4
         
     - name: Run script
       env:
